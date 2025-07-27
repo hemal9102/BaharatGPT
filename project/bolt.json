@@ -1,0 +1,8 @@
+{
+    "build": "echo 'No build needed'",
+    "output": ".",
+    "scripts": {
+      "bolt:deploy": "bolt deploy"
+    }
+  }
+  
