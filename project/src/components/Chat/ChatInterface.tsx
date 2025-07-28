@@ -3,6 +3,7 @@ import { Send, BookOpen, User, Bot, Volume2, VolumeX } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { Message, LearningModule } from '../../types';
+import MultilingualResponse from './MultilingualResponse';
 
 export const ChatInterface: React.FC = () => {
   const { user } = useAuth();
@@ -32,6 +33,16 @@ export const ChatInterface: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Auto-scroll on input focus for better UX
+  useEffect(() => {
+    const inputEl = document.querySelector('input[type="text"]');
+    inputEl?.addEventListener('focus', () => {
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+    });
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputMessage.trim() || isLoading) return;
@@ -50,28 +61,80 @@ export const ChatInterface: React.FC = () => {
 
     try {
       // Send to N8N webhook with enhanced context
+      const requestBody = {
+        chatInput: userMessage.text,
+        body: {
+          message: userMessage.text
+        },
+        user_id: user?.id,
+        module_id: currentModule?.id,
+        context: {
+          previous_messages: messages.slice(-5),
+          user_level: 'beginner',
+          language_preference: 'en'
+        }
+      };
+      
+      console.log('Sending to N8N:', requestBody);
+      console.log('N8N Webhook URL:', 'https://abbe90c95b33.ngrok-free.app/webhook-test/4a7b0437-a005-48da-9c6c-6f29b8ca8842');
+      
       const response = await fetch('https://abbe90c95b33.ngrok-free.app/webhook-test/4a7b0437-a005-48da-9c6c-6f29b8ca8842', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
-        body: JSON.stringify({
-          message: userMessage.text,
-          user_id: user?.id,
-          module_id: currentModule?.id,
-          context: {
-            previous_messages: messages.slice(-5),
-            user_level: 'beginner',
-            language_preference: 'en'
-          }
-        })
+        mode: 'cors',
+        body: JSON.stringify(requestBody)
       });
+      
+      console.log('N8N Response Status:', response.status);
+      console.log('N8N Response Headers:', response.headers);
 
       const data = await response.json();
+      console.log('N8N Response:', data);
+      console.log('N8N Response (stringified):', JSON.stringify(data, null, 2));
+
+      let aiResponseText = "I'm here to help you learn! Could you please rephrase your question?";
+
+      // ✅ Parse multilingual lesson type - Simplified and reliable approach
+      if (data?.type === 'multilingual-lesson') {
+        const { english, hindi, gujarati } = data;
+        
+        // Validate response format
+        if (!english || !hindi || !gujarati) {
+          console.warn('Incomplete multilingual response:', data);
+        }
+
+        aiResponseText = `🟦 **ENGLISH VERSION**\n${english || ''}\n\n---\n\n🟧 **HINDI VERSION**\n${hindi || ''}\n\n---\n\n🟩 **GUJARATI VERSION**\n${gujarati || ''}`;
+        
+        console.log('Formatted multilingual response:', aiResponseText);
+      } else if (Array.isArray(data) && data.length > 0) {
+        // Handle array response from N8N
+        const firstItem = data[0];
+        console.log('Array response first item:', firstItem);
+        
+        if (firstItem?.json?.type === 'multilingual-lesson') {
+          const { english, hindi, gujarati } = firstItem.json;
+          
+          aiResponseText = `🟦 **ENGLISH VERSION**\n${english || ''}\n\n---\n\n🟧 **HINDI VERSION**\n${hindi || ''}\n\n---\n\n🟩 **GUJARATI VERSION**\n${gujarati || ''}`;
+          
+          console.log('Formatted multilingual response from array:', aiResponseText);
+        } else {
+          console.log('Array response but not multilingual format:', firstItem);
+          aiResponseText = firstItem?.json?.content || firstItem?.json?.output || firstItem?.json?.text || aiResponseText;
+        }
+      } else {
+        // Fallback for other response types
+        console.log('Non-multilingual response, using fallback');
+        aiResponseText = data?.response || data?.message || data?.text || data?.output || data?.content || aiResponseText;
+      }
+      
+      console.log('Final AI Response:', aiResponseText); // Debug log
       
       const aiMessage: Message = {
         id: Date.now() + 1,
-        text: data.response || data.message || "I'm here to help you learn! Could you please rephrase your question?",
+        text: aiResponseText,
         isUser: false,
         timestamp: new Date(),
         understanding_feedback: data.understanding_level || 3
@@ -99,10 +162,15 @@ export const ChatInterface: React.FC = () => {
       
     } catch (error) {
       console.error('Webhook error:', error);
+      console.error('Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : 'No stack trace',
+        name: error instanceof Error ? error.name : 'Unknown'
+      });
       
       const fallbackMessage: Message = {
         id: Date.now() + 1,
-        text: "I'm having trouble connecting right now, but I'm here to help you learn! What subject would you like to explore today?",
+        text: `Connection error: ${error instanceof Error ? error.message : 'Unknown error'}. Please check your N8N workflow and try again.`,
         isUser: false,
         timestamp: new Date()
       };
@@ -188,7 +256,22 @@ export const ChatInterface: React.FC = () => {
                           : 'bg-white text-gray-800 rounded-bl-md border border-gray-200'
                       }`}
                     >
-                      <p className="text-sm leading-relaxed">{message.text}</p>
+                      <div className="text-sm leading-relaxed">
+                        {message.text.includes('🟦 ENGLISH VERSION:') || message.text.includes('🟧 HINDI VERSION:') || message.text.includes('🟩 GUJARATI VERSION:') ? (
+                          <MultilingualResponse content={message.text} />
+                        ) : (
+                          <div 
+                            className="prose prose-sm max-w-none"
+                            dangerouslySetInnerHTML={{
+                              __html: message.text
+                                .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-gray-900">$1</strong>')
+                                .replace(/```([\s\S]*?)```/g, '<pre class="bg-gray-100 p-3 rounded-lg text-xs overflow-x-auto border border-gray-300 my-2"><code class="text-gray-800">$1</code></pre>')
+                                .replace(/`([^`]+)`/g, '<code class="bg-gray-200 px-1 py-0.5 rounded text-xs">$1</code>')
+                                .replace(/\n/g, '<br>')
+                            }}
+                          />
+                        )}
+                      </div>
                       
                       {/* Understanding Level Indicator */}
                       {!message.isUser && message.understanding_feedback && (
