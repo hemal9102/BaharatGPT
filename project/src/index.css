@@ -31,3 +31,35 @@
 .animate-pulse {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+/* Chat message formatting styles */
+.chat-message strong {
+  font-weight: 600;
+  color: inherit;
+}
+
+.chat-message em {
+  font-style: italic;
+}
+
+.chat-message code {
+  background-color: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+  color: #374151;
+}
+
+.chat-message br {
+  margin-bottom: 0.5rem;
+}
+
+/* Better spacing for formatted text */
+.chat-message p {
+  margin-bottom: 0.75rem;
+}
+
+.chat-message p:last-child {
+  margin-bottom: 0;
+}

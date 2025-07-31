@@ -105,6 +105,24 @@ export const ChatInterface: React.FC = () => {
     }
   }, [user]);
 
+  // Format message text to clean up markdown and formatting
+  const formatMessageText = (text: string): string => {
+    return text
+      // Convert markdown bold to HTML
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      // Convert markdown italic to HTML
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      // Convert line breaks to proper HTML
+      .replace(/\n/g, '<br />')
+      // Clean up multiple spaces
+      .replace(/\s+/g, ' ')
+      // Add proper spacing around code blocks
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      // Clean up any remaining asterisks that aren't part of formatting
+      .replace(/(?<!\*)\*(?!\*)/g, '')
+      .trim();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputMessage.trim() || isLoading) return;
@@ -434,8 +452,14 @@ export const ChatInterface: React.FC = () => {
                       }`}
                     >
                       <div 
-                        className="text-sm leading-relaxed"
-                        dangerouslySetInnerHTML={{ __html: message.text.replace(/<br>/g, '<br />') }}
+                        className="text-sm leading-relaxed max-w-none chat-message"
+                        style={{
+                          lineHeight: '1.6',
+                          wordBreak: 'break-word'
+                        }}
+                        dangerouslySetInnerHTML={{ 
+                          __html: formatMessageText(message.text)
+                        }}
                       />
                       
                       {/* Speech indicator for AI messages */}
