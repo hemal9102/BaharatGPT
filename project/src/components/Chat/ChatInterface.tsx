@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, BookOpen, User, Bot, Volume2, VolumeX, Globe, Mic, MicOff } from 'lucide-react';
+import { Send, BookOpen, User, Bot, Volume2, VolumeX, Globe, Mic, MicOff, History } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { Message, LearningModule } from '../../types';
 import { speakText, stopSpeaking, initializeVoices, isSpeechSupported, checkLanguageSupport } from '../../utils/speechUtils';
 import { VoiceNotification } from './VoiceNotification';
 import { speechRecognitionManager, isSpeechRecognitionSupported } from '../../utils/speechRecognition';
+import { getUserLearningHistory } from '../../lib/quizService';
 
 interface MultilingualResponse {
   type: string;
@@ -45,6 +46,8 @@ export const ChatInterface: React.FC = () => {
   const [showVoiceNotification, setShowVoiceNotification] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
+  const [learningHistory, setLearningHistory] = useState<any[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
@@ -82,6 +85,25 @@ export const ChatInterface: React.FC = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Fetch user's learning history
+  const fetchLearningHistory = async () => {
+    try {
+      const { data } = await getUserLearningHistory();
+      if (data) {
+        setLearningHistory(data);
+      }
+    } catch (error) {
+      console.error('Error fetching learning history:', error);
+    }
+  };
+
+  // Load learning history when component mounts
+  useEffect(() => {
+    if (user) {
+      fetchLearningHistory();
+    }
+  }, [user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -152,16 +174,53 @@ export const ChatInterface: React.FC = () => {
 
       setMessages(prev => [...prev, aiMessage]);
 
-      // Save chat interaction to database with multilingual support
+      // Save chat interaction to learning_history table with multilingual support
       if (user) {
-        await supabase.from('chat_interactions').insert({
-          user_id: user.id,
-          module_id: currentModule?.id,
-          user_message: userMessage.text,
-          ai_response: aiMessage.text,
-          understanding_level: data.understanding_level || 3,
-          language_used: selectedLanguage
-        });
+        try {
+          // Get current authenticated user
+          const { data: { user: currentUser } } = await supabase.auth.getUser();
+          
+          if (currentUser) {
+            // Save user message to learning history
+            await supabase.from('learning_history').insert({
+              user_id: currentUser.id,
+              type: 'chat_user_message',
+              english: selectedLanguage === 'english' ? userMessage.text : '',
+              hindi: selectedLanguage === 'hindi' ? userMessage.text : '',
+              gujarati: selectedLanguage === 'gujarati' ? userMessage.text : '',
+              content: userMessage.text,
+              timestamp: new Date().toISOString()
+            });
+
+            // Save AI response to learning history
+            await supabase.from('learning_history').insert({
+              user_id: currentUser.id,
+              type: 'chat_ai_response',
+              english: selectedLanguage === 'english' ? aiMessage.text : '',
+              hindi: selectedLanguage === 'hindi' ? aiMessage.text : '',
+              gujarati: selectedLanguage === 'gujarati' ? aiMessage.text : '',
+              content: aiMessage.text,
+              understanding_level: data.understanding_level || 3,
+              language_used: selectedLanguage,
+              timestamp: new Date().toISOString()
+            });
+
+            // Also save to chat_interactions table for backward compatibility
+            await supabase.from('chat_interactions').insert({
+              user_id: currentUser.id,
+              module_id: currentModule?.id,
+              user_message: userMessage.text,
+              ai_response: aiMessage.text,
+              understanding_level: data.understanding_level || 3,
+              language_used: selectedLanguage
+            });
+          }
+        } catch (error) {
+          console.error('Error saving to learning history:', error);
+        }
+        
+        // Refresh learning history after saving
+        await fetchLearningHistory();
       }
 
       // Restart listening if it was active before
@@ -270,6 +329,16 @@ export const ChatInterface: React.FC = () => {
               </div>
               
               <button
+                onClick={() => setShowHistory(!showHistory)}
+                className={`p-2 rounded-lg transition-colors ${
+                  showHistory ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'
+                }`}
+                title="View learning history"
+              >
+                <History className="w-5 h-5" />
+              </button>
+              
+              <button
                 onClick={() => {
                   if (audioEnabled) {
                     stopSpeaking();
@@ -290,10 +359,57 @@ export const ChatInterface: React.FC = () => {
 
       {/* Chat Section */}
       <main className="flex-1 pt-16 pb-20 overflow-hidden">
-        <div 
-          ref={chatContainerRef}
-          className="h-full overflow-y-auto px-4 py-4 max-w-4xl mx-auto"
-        >
+        <div className="flex h-full">
+          {/* Learning History Sidebar */}
+          {showHistory && (
+            <div className="w-80 bg-white border-r border-gray-200 overflow-y-auto">
+              <div className="p-4 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">Learning History</h3>
+                <p className="text-sm text-gray-600">Your recent learning activities</p>
+              </div>
+              <div className="p-4 space-y-3">
+                {learningHistory.length > 0 ? (
+                  learningHistory.map((item, index) => (
+                    <div key={index} className="p-3 bg-gray-50 rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-medium text-gray-500 uppercase">
+                          {item.type || item.activity_type}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          {new Date(item.timestamp).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <div className="text-sm text-gray-900">
+                        {item.content || item.topic || 'Learning activity'}
+                      </div>
+                      {item.language_used && (
+                        <div className="text-xs text-blue-600 mt-1">
+                          Language: {item.language_used}
+                        </div>
+                      )}
+                      {item.understanding_level && (
+                        <div className="text-xs text-green-600 mt-1">
+                          Understanding: {item.understanding_level}/5
+                        </div>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <History className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                    <p>No learning history yet</p>
+                    <p className="text-sm">Start chatting to build your history</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          
+          {/* Chat Messages */}
+          <div 
+            ref={chatContainerRef}
+            className={`h-full overflow-y-auto px-4 py-4 ${showHistory ? 'flex-1' : 'max-w-4xl mx-auto w-full'}`}
+          >
           <div className="space-y-4">
             {messages.map((message) => (
               <div
@@ -392,6 +508,7 @@ export const ChatInterface: React.FC = () => {
           </div>
           
           <div ref={messagesEndRef} />
+        </div>
         </div>
       </main>
 

@@ -40,7 +40,7 @@ export const QuizGenerator: React.FC<QuizGeneratorProps> = ({ onComplete }) => {
 
     try {
       // Get user's learning history to determine topics
-      const { data: learningHistory } = await getUserLearningHistory(user.id, 10);
+      const { data: learningHistory } = await getUserLearningHistory();
 
       // Try to generate quiz from n8n workflow
       try {
@@ -56,7 +56,6 @@ export const QuizGenerator: React.FC<QuizGeneratorProps> = ({ onComplete }) => {
 
         // Save learning history for quiz generation
         await saveLearningHistory({
-          user_id: user.id,
           topic: quizData.quiz.topic,
           activity_type: 'quiz_generated',
           details: {
@@ -138,7 +137,6 @@ export const QuizGenerator: React.FC<QuizGeneratorProps> = ({ onComplete }) => {
 
         // Save learning history for fallback quiz
         await saveLearningHistory({
-          user_id: user.id,
           topic: "Digital Literacy",
           activity_type: 'quiz_generated_fallback',
           details: {
@@ -239,7 +237,6 @@ export const QuizGenerator: React.FC<QuizGeneratorProps> = ({ onComplete }) => {
 
         // Save learning history
         await saveLearningHistory({
-          user_id: user.id,
           topic: result.quiz_topic,
           activity_type: 'quiz_completed',
           details: {

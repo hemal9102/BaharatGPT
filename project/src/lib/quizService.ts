@@ -1,20 +1,34 @@
 import { supabase } from './supabase';
 import { QuizAttempt } from '../types';
 
-export async function getUserLearningHistory(userId: string, limit: number = 10) {
-  const { data, error } = await supabase
-    .from('learning_history')
-    .select('*')
-    .eq('user_id', userId)
-    .order('timestamp', { ascending: false })
-    .limit(limit);
+export async function getUserLearningHistory(userId?: string, limit: number = 10) {
+  try {
+    // Get current authenticated user if userId not provided
+    let currentUserId = userId;
+    if (!currentUserId) {
+      const { data: { user } } = await supabase.auth.getUser();
+      currentUserId = user?.id;
+    }
 
-  if (error) {
-    console.error('Error fetching learning history:', error);
-    // Depending on your error handling strategy, you might want to throw the error
-    // or return a specific error object/value.
+    if (!currentUserId) {
+      throw new Error('No authenticated user found');
+    }
+
+    const { data, error } = await supabase
+      .from('learning_history')
+      .select('*')
+      .eq('user_id', currentUserId)
+      .order('timestamp', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('Error fetching learning history:', error);
+    }
+    return { data, error };
+  } catch (error) {
+    console.error('Error in getUserLearningHistory:', error);
+    return { data: null, error };
   }
-  return { data, error };
 }
 
 // You might also create a function for saving quiz attempts if it gets complex
@@ -63,21 +77,45 @@ export async function getUserProgress(userId: string) {
 
 // Save learning history entry
 export async function saveLearningHistory(historyData: {
-  user_id: string;
+  user_id?: string;
   module_id?: string;
-  topic: string;
+  topic?: string;
   activity_type: string;
   details?: any;
+  type?: string;
+  english?: string;
+  hindi?: string;
+  gujarati?: string;
+  content?: string;
+  understanding_level?: number;
+  language_used?: string;
 }) {
-  const { data, error } = await supabase
-    .from('learning_history')
-    .insert({
-      ...historyData,
-      timestamp: new Date().toISOString()
-    });
+  try {
+    // Get current authenticated user if user_id not provided
+    let currentUserId = historyData.user_id;
+    if (!currentUserId) {
+      const { data: { user } } = await supabase.auth.getUser();
+      currentUserId = user?.id;
+    }
 
-  if (error) {
-    console.error('Error saving learning history:', error);
+    if (!currentUserId) {
+      throw new Error('No authenticated user found');
+    }
+
+    const { data, error } = await supabase
+      .from('learning_history')
+      .insert({
+        ...historyData,
+        user_id: currentUserId,
+        timestamp: new Date().toISOString()
+      });
+
+    if (error) {
+      console.error('Error saving learning history:', error);
+    }
+    return { data, error };
+  } catch (error) {
+    console.error('Error in saveLearningHistory:', error);
+    return { data: null, error };
   }
-  return { data, error };
 }
