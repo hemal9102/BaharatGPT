@@ -74,15 +74,28 @@ export interface QuizQuestion {
 export interface QuizAttempt {
   id: string;
   user_id: string;
-  quiz_id: string;
-  answers: Record<string, string>;
-  score: number;
-  percentage: number;
-  grade: 'A' | 'B' | 'C' | 'D' | 'F';
-  time_taken_minutes: number;
-  attempt_number: number;
+  quiz_id?: string;
+  quiz_title?: string;
+  quiz_topic?: string;
+  answers?: Record<string, string>;
+  score?: number;
+  score_percent?: number;
+  percentage?: number;
+  grade?: 'A' | 'B' | 'C' | 'D' | 'F';
+  time_taken_minutes?: number;
+  attempt_number?: number;
   passed: boolean;
-  started_at: string;
+  total_questions?: number;
+  correct_count?: number;
+  feedback?: string;
+  graded_questions?: Array<{
+    question: string;
+    type: string;
+    user_answer: string;
+    correct_answer: string;
+    is_correct: boolean;
+  }>;
+  started_at?: string;
   completed_at: string;
 }
 
@@ -104,4 +117,5 @@ export interface Message {
   timestamp: Date;
   module_id?: string;
   understanding_feedback?: number;
+  language_used?: 'english' | 'hindi' | 'gujarati';
 }

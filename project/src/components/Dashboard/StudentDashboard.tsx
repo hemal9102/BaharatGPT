@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabase } from '../../lib/supabase';
-import { BookOpen, Trophy, Clock, Target, TrendingUp, Award } from 'lucide-react';
-import { LearningModule, UserProgress, QuizAttempt } from '../../types';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../../lib/supabase';
+import { BookOpen, Trophy, Clock, Target, TrendingUp, Award, MessageCircle } from 'lucide-react';
+import { LearningModule, UserProgress, QuizAttempt } from '../../types';
 
 export const StudentDashboard: React.FC = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [modules, setModules] = useState<LearningModule[]>([]);
   const [progress, setProgress] = useState<UserProgress[]>([]);
   const [recentAttempts, setRecentAttempts] = useState<QuizAttempt[]>([]);
@@ -17,7 +18,6 @@ export const StudentDashboard: React.FC = () => {
     certificationsEarned: 0
   });
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
 
   useEffect(() => {
     if (user) {
@@ -43,7 +43,7 @@ export const StudentDashboard: React.FC = () => {
       // Fetch recent quiz attempts
       const { data: attemptsData } = await supabase
         .from('quiz_attempts')
-        .select('*, quizzes(title)')
+        .select('*')
         .eq('user_id', user?.id)
         .order('completed_at', { ascending: false })
         .limit(5);
@@ -224,7 +224,7 @@ export const StudentDashboard: React.FC = () => {
                   {recentAttempts.map((attempt) => (
                     <div key={attempt.id} className="flex items-center justify-between">
                       <div>
-                        <p className="font-medium text-gray-900">{attempt.quizzes?.title}</p>
+                        <p className="font-medium text-gray-900">{attempt.quiz_title || 'Quiz'}</p>
                         <p className="text-sm text-gray-600">
                           {new Date(attempt.completed_at).toLocaleDateString()}
                         </p>
@@ -235,7 +235,7 @@ export const StudentDashboard: React.FC = () => {
                             ? 'bg-green-100 text-green-800' 
                             : 'bg-red-100 text-red-800'
                         }`}>
-                          {attempt.grade} ({attempt.percentage}%)
+                          {attempt.score_percent}%
                         </span>
                       </div>
                     </div>
@@ -253,24 +253,27 @@ export const StudentDashboard: React.FC = () => {
                 <h2 className="text-lg font-semibold text-gray-900">Quick Actions</h2>
               </div>
               <div className="p-6 space-y-3">
-                <button
-                  className="w-full flex items-center justify-center px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-                  onClick={() => {
-                    // Optionally set a flag for AI session start
-                    localStorage.setItem('aiSessionActive', 'true');
-                    navigate('/chat');
-                  }}
-                >
+                {/* Inside StudentDashboard.tsx - The corrected button */}
+                 <button
+   onClick={() => navigate('/chat')} 
+   className="w-full flex items-center justify-center px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+ >
                   <BookOpen className="w-5 h-5 mr-2" />
-                  Start AI Chat Session
-                </button>
-                <button className="w-full flex items-center justify-center px-4 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors">
+   Start Multilingual AI Learning 
+ </button>     
+                <button 
+                  onClick={() => navigate('/quiz-generator')}
+                  className="w-full flex items-center justify-center px-4 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                >
                   <Trophy className="w-5 h-5 mr-2" />
                   Take a Quiz
                 </button>
-                <button className="w-full flex items-center justify-center px-4 py-3 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors">
-                  <Award className="w-5 h-5 mr-2" />
-                  View Certificates
+                <button 
+                  onClick={() => navigate('/chat')}
+                  className="w-full flex items-center justify-center px-4 py-3 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
+                >
+                  <MessageCircle className="w-5 h-5 mr-2" />
+                  Start AI Chat Session
                 </button>
               </div>
             </div>

@@ -1,22 +1,37 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, BookOpen, User, Bot, Volume2, VolumeX } from 'lucide-react';
+import { Send, BookOpen, User, Bot, Volume2, VolumeX, Globe, Mic, MicOff } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { Message, LearningModule } from '../../types';
-import MultilingualResponse from './MultilingualResponse';
+import { speakText, stopSpeaking, initializeVoices, isSpeechSupported, checkLanguageSupport } from '../../utils/speechUtils';
+import { VoiceNotification } from './VoiceNotification';
+import { speechRecognitionManager, isSpeechRecognitionSupported } from '../../utils/speechRecognition';
+
+interface MultilingualResponse {
+  type: string;
+  languages: {
+    english: string;
+    hindi: string;
+    gujarati: string;
+  };
+  meta: {
+    responseId: string;
+    timestamp: string;
+  };
+}
 
 export const ChatInterface: React.FC = () => {
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 1,
-      text: "Hello, I want to learn HTML.",
+      text: "Hello, I want to learn digital literacy and coding.",
       isUser: true,
       timestamp: new Date()
     },
     {
       id: 2,
-      text: "Great! Let's get started with HTML basics. HTML stands for HyperText Markup Language and is the foundation of web development. Would you like to start with basic HTML structure or specific elements?",
+      text: "Great! Let's start with digital literacy basics. I'll teach you step by step in multiple languages to help you understand better.",
       isUser: false,
       timestamp: new Date()
     }
@@ -26,26 +41,56 @@ export const ChatInterface: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [currentModule, setCurrentModule] = useState<LearningModule | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState<'english' | 'hindi' | 'gujarati'>('english');
+  const [showVoiceNotification, setShowVoiceNotification] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Initialize speech synthesis voices and check speech recognition support
+  useEffect(() => {
+    initializeVoices();
+    setSpeechSupported(isSpeechRecognitionSupported());
+    
+    // Setup speech recognition callbacks
+    speechRecognitionManager.setCallbacks({
+      onResult: (text: string) => {
+        setInputMessage(text);
+        // Don't stop listening - keep it continuous
+        // Only stop if user manually stops or submits
+      },
+      onError: (error: string) => {
+        console.error('Speech recognition error:', error);
+        setIsListening(false);
+      },
+      onStart: () => {
+        setIsListening(true);
+      },
+      onEnd: () => {
+        setIsListening(false);
+      }
+    });
+    
+    // Cleanup: stop speech when component unmounts
+    return () => {
+      stopSpeaking();
+      speechRecognitionManager.stopListening();
+    };
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Auto-scroll on input focus for better UX
-  useEffect(() => {
-    const inputEl = document.querySelector('input[type="text"]');
-    inputEl?.addEventListener('focus', () => {
-      setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }, 100);
-    });
-  }, []);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputMessage.trim() || isLoading) return;
+
+    // Stop listening when submitting
+    if (isListening) {
+      speechRecognitionManager.stopListening();
+    }
 
     const userMessage: Message = {
       id: Date.now(),
@@ -60,77 +105,42 @@ export const ChatInterface: React.FC = () => {
     setIsLoading(true);
 
     try {
-      // Send to N8N webhook with enhanced context
-      const requestBody = {
-        chatInput: userMessage.text,
-        body: {
-          message: userMessage.text
-        },
-        user_id: user?.id,
-        module_id: currentModule?.id,
-        context: {
-          previous_messages: messages.slice(-5),
-          user_level: 'beginner',
-          language_preference: 'en'
-        }
-      };
+      // Send to your N8N multilingual workflow
+      const webhookUrl = import.meta.env.VITE_N8N_WEBHOOK_URL || 'https://e033a98c0626.ngrok-free.app/webhook/67a85760-2dd7-474a-bd42-cb2d6b17e7cc';
       
-      console.log('Sending to N8N:', requestBody);
-      console.log('N8N Webhook URL:', 'https://abbe90c95b33.ngrok-free.app/webhook-test/4a7b0437-a005-48da-9c6c-6f29b8ca8842');
-      
-      const response = await fetch('https://abbe90c95b33.ngrok-free.app/webhook-test/4a7b0437-a005-48da-9c6c-6f29b8ca8842', {
+      const response = await fetch(webhookUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true'
         },
-        mode: 'cors',
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify({
+          message: userMessage.text,
+          user_id: user?.id,
+          chatInput: userMessage.text,
+          body: { body: { message: userMessage.text } },
+          context: {
+            previous_messages: messages.slice(-5),
+            user_level: 'beginner',
+            language_preference: selectedLanguage
+          }
+        })
       });
+
+      const rawData = await response.json();
+            // N8N might return an array with one object, or just the object.
+      const data = Array.isArray(rawData) ? rawData[0] : rawData; // Extract the first object if it's an array
       
-      console.log('N8N Response Status:', response.status);
-      console.log('N8N Response Headers:', response.headers);
-
-      const data = await response.json();
-      console.log('N8N Response:', data);
-      console.log('N8N Response (stringified):', JSON.stringify(data, null, 2));
-
-      let aiResponseText = "I'm here to help you learn! Could you please rephrase your question?";
-
-      // ✅ Parse multilingual lesson type - Simplified and reliable approach
-      if (data?.type === 'multilingual-lesson') {
-        const { english, hindi, gujarati } = data;
-        
-        // Validate response format
-        if (!english || !hindi || !gujarati) {
-          console.warn('Incomplete multilingual response:', data);
-        }
-
-        aiResponseText = `🟦 **ENGLISH VERSION**\n${english || ''}\n\n---\n\n🟧 **HINDI VERSION**\n${hindi || ''}\n\n---\n\n🟩 **GUJARATI VERSION**\n${gujarati || ''}`;
-        
-        console.log('Formatted multilingual response:', aiResponseText);
-      } else if (Array.isArray(data) && data.length > 0) {
-        // Handle array response from N8N
-        const firstItem = data[0];
-        console.log('Array response first item:', firstItem);
-        
-        if (firstItem?.json?.type === 'multilingual-lesson') {
-          const { english, hindi, gujarati } = firstItem.json;
-          
-          aiResponseText = `🟦 **ENGLISH VERSION**\n${english || ''}\n\n---\n\n🟧 **HINDI VERSION**\n${hindi || ''}\n\n---\n\n🟩 **GUJARATI VERSION**\n${gujarati || ''}`;
-          
-          console.log('Formatted multilingual response from array:', aiResponseText);
-        } else {
-          console.log('Array response but not multilingual format:', firstItem);
-          aiResponseText = firstItem?.json?.content || firstItem?.json?.output || firstItem?.json?.text || aiResponseText;
-        }
+      // Handle multilingual response
+      let aiResponseText = '';
+      if (data.response && data.response.languages) {
+        const multilingualData = data.response as MultilingualResponse;
+        aiResponseText = multilingualData.languages[selectedLanguage] || 
+                        multilingualData.languages.english || 
+                        "I'm here to help you learn!";
       } else {
-        // Fallback for other response types
-        console.log('Non-multilingual response, using fallback');
-        aiResponseText = data?.response || data?.message || data?.text || data?.output || data?.content || aiResponseText;
+        aiResponseText = data.response || data.message || "I'm here to help you learn! Could you please rephrase your question?";
       }
-      
-      console.log('Final AI Response:', aiResponseText); // Debug log
       
       const aiMessage: Message = {
         id: Date.now() + 1,
@@ -142,35 +152,46 @@ export const ChatInterface: React.FC = () => {
 
       setMessages(prev => [...prev, aiMessage]);
 
-      // Save chat interaction to database
+      // Save chat interaction to database with multilingual support
       if (user) {
         await supabase.from('chat_interactions').insert({
           user_id: user.id,
           module_id: currentModule?.id,
           user_message: userMessage.text,
           ai_response: aiMessage.text,
-          understanding_level: data.understanding_level || 3
+          understanding_level: data.understanding_level || 3,
+          language_used: selectedLanguage
         });
       }
 
-      // Text-to-speech for audio support
-      if (audioEnabled && 'speechSynthesis' in window) {
-        const utterance = new SpeechSynthesisUtterance(aiMessage.text);
-        utterance.lang = 'en-US';
-        speechSynthesis.speak(utterance);
+      // Restart listening if it was active before
+      if (speechSupported && !isListening) {
+        // Small delay to ensure the AI response is processed
+        setTimeout(() => {
+          speechRecognitionManager.startListening(selectedLanguage);
+        }, 1000);
+      }
+
+      // Text-to-speech for audio support with multilingual support
+      if (audioEnabled && isSpeechSupported()) {
+        // Check if we have native voice support for the selected language
+        const languageSupport = checkLanguageSupport(selectedLanguage);
+        
+        if (!languageSupport.supported && (selectedLanguage === 'hindi' || selectedLanguage === 'gujarati')) {
+          // Show notification that fallback is being used
+          setShowVoiceNotification(true);
+          console.log(`Using fallback voice for ${selectedLanguage}. Install language packs for better experience.`);
+        }
+        
+        speakText(aiMessage.text, selectedLanguage);
       }
       
     } catch (error) {
       console.error('Webhook error:', error);
-      console.error('Error details:', {
-        message: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : 'No stack trace',
-        name: error instanceof Error ? error.name : 'Unknown'
-      });
       
       const fallbackMessage: Message = {
         id: Date.now() + 1,
-        text: `Connection error: ${error instanceof Error ? error.message : 'Unknown error'}. Please check your N8N workflow and try again.`,
+        text: "I'm having trouble connecting right now, but I'm here to help you learn digital literacy! What would you like to learn today?",
         isUser: false,
         timestamp: new Date()
       };
@@ -191,8 +212,34 @@ export const ChatInterface: React.FC = () => {
     }
   };
 
+  const handleLanguageChange = (newLanguage: 'english' | 'hindi' | 'gujarati') => {
+    // Stop any current speech when changing language
+    if (audioEnabled) {
+      stopSpeaking();
+    }
+    setSelectedLanguage(newLanguage);
+  };
+
+  const handleMicrophoneToggle = () => {
+    if (isListening) {
+      speechRecognitionManager.stopListening();
+      setIsListening(false);
+    } else {
+      const success = speechRecognitionManager.startListening(selectedLanguage);
+      if (!success) {
+        console.error('Failed to start speech recognition');
+        setIsListening(false);
+      }
+    }
+  };
+
   return (
     <div className="h-screen flex flex-col bg-gray-50">
+      <VoiceNotification
+        language={selectedLanguage}
+        showNotification={showVoiceNotification}
+        onClose={() => setShowVoiceNotification(false)}
+      />
       {/* Enhanced Header */}
       <header className="fixed top-0 left-0 right-0 z-10 bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-4xl mx-auto px-4 py-3">
@@ -201,7 +248,7 @@ export const ChatInterface: React.FC = () => {
               <BookOpen className="w-6 h-6 text-blue-600 mr-2" />
               <div>
                 <h1 className="text-lg font-semibold text-gray-800">
-                  BharatGPT – AI Chat for Students
+                  BharatGPT – AI Chat Session
                 </h1>
                 {currentModule && (
                   <p className="text-sm text-gray-600">Learning: {currentModule.title}</p>
@@ -209,19 +256,33 @@ export const ChatInterface: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center space-x-3">
+              <div className="flex items-center space-x-2">
+                <Globe className="w-4 h-4 text-gray-600" />
+                <select 
+                  value={selectedLanguage}
+                  onChange={(e) => handleLanguageChange(e.target.value as 'english' | 'hindi' | 'gujarati')}
+                  className="text-sm border border-gray-300 rounded-lg px-2 py-1 bg-white"
+                >
+                  <option value="english">English</option>
+                  <option value="hindi">हिंदी</option>
+                  <option value="gujarati">ગુજરાતી</option>
+                </select>
+              </div>
+              
               <button
-                onClick={() => setAudioEnabled(!audioEnabled)}
+                onClick={() => {
+                  if (audioEnabled) {
+                    stopSpeaking();
+                  }
+                  setAudioEnabled(!audioEnabled);
+                }}
                 className={`p-2 rounded-lg transition-colors ${
                   audioEnabled ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'
                 }`}
+                title={audioEnabled ? 'Disable speech' : 'Enable speech'}
               >
                 {audioEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
               </button>
-              <select className="text-sm border border-gray-300 rounded-lg px-2 py-1">
-                <option value="en">English</option>
-                <option value="hi">हिंदी</option>
-                <option value="bn">বাংলা</option>
-              </select>
             </div>
           </div>
         </div>
@@ -256,22 +317,21 @@ export const ChatInterface: React.FC = () => {
                           : 'bg-white text-gray-800 rounded-bl-md border border-gray-200'
                       }`}
                     >
-                      <div className="text-sm leading-relaxed">
-                        {message.text.includes('🟦 ENGLISH VERSION:') || message.text.includes('🟧 HINDI VERSION:') || message.text.includes('🟩 GUJARATI VERSION:') ? (
-                          <MultilingualResponse content={message.text} />
-                        ) : (
-                          <div 
-                            className="prose prose-sm max-w-none"
-                            dangerouslySetInnerHTML={{
-                              __html: message.text
-                                .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-gray-900">$1</strong>')
-                                .replace(/```([\s\S]*?)```/g, '<pre class="bg-gray-100 p-3 rounded-lg text-xs overflow-x-auto border border-gray-300 my-2"><code class="text-gray-800">$1</code></pre>')
-                                .replace(/`([^`]+)`/g, '<code class="bg-gray-200 px-1 py-0.5 rounded text-xs">$1</code>')
-                                .replace(/\n/g, '<br>')
-                            }}
-                          />
-                        )}
-                      </div>
+                      <div 
+                        className="text-sm leading-relaxed"
+                        dangerouslySetInnerHTML={{ __html: message.text.replace(/<br>/g, '<br />') }}
+                      />
+                      
+                      {/* Speech indicator for AI messages */}
+                      {!message.isUser && audioEnabled && (
+                        <div className="mt-2 flex items-center space-x-2">
+                          <Volume2 className="w-3 h-3 text-blue-500" />
+                          <span className="text-xs text-gray-500">
+                            Speech: {selectedLanguage === 'english' ? 'English' : 
+                                    selectedLanguage === 'hindi' ? 'हिंदी' : 'ગુજરાતી'}
+                          </span>
+                        </div>
+                      )}
                       
                       {/* Understanding Level Indicator */}
                       {!message.isUser && message.understanding_feedback && (
@@ -344,11 +404,28 @@ export const ChatInterface: React.FC = () => {
                 type="text"
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
-                placeholder="Ask me anything about your studies..."
+                placeholder={`Ask me anything in ${selectedLanguage === 'english' ? 'English' : selectedLanguage === 'hindi' ? 'हिंदी' : 'ગુજરાતી'}...`}
                 className="w-full px-4 py-3 pr-12 bg-gray-50 border border-gray-200 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                 disabled={isLoading}
               />
             </div>
+            
+            {/* Microphone Button */}
+            {speechSupported && (
+              <button
+                type="button"
+                onClick={handleMicrophoneToggle}
+                disabled={isLoading}
+                className={`flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center transition-colors duration-200 ${
+                  isListening 
+                    ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg' 
+                    : 'bg-green-500 hover:bg-green-600 text-white'
+                }`}
+                title={isListening ? 'Stop listening' : `Speak in ${selectedLanguage}`}
+              >
+                {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+              </button>
+            )}
             
             <button
               type="submit"
@@ -360,7 +437,14 @@ export const ChatInterface: React.FC = () => {
           </form>
           
           <div className="mt-2 text-xs text-gray-500 text-center">
-            BharatGPT can make mistakes. Verify important information.
+            AI Chat Session - Ask me anything in your preferred language!
+            {isListening && (
+              <div className="mt-1 text-red-500 font-medium animate-pulse flex items-center justify-center space-x-1">
+                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                <span>🎤 Listening continuously... Speak now!</span>
+                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" style={{animationDelay: '0.2s'}}></div>
+              </div>
+            )}
           </div>
         </div>
       </footer>

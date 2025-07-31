@@ -7,6 +7,9 @@ import { StudentDashboard } from './components/Dashboard/StudentDashboard';
 import { AdminDashboard } from './components/Admin/AdminDashboard';
 import { ChatInterface } from './components/Chat/ChatInterface';
 import { QuizInterface } from './components/Quiz/QuizInterface';
+import { QuizGenerator } from './components/Quiz/QuizGenerator';
+import { SpeechTest } from './components/Chat/SpeechTest';
+import { SpeechRecognitionTest } from './components/Chat/SpeechRecognitionTest';
 import { LogOut, BookOpen } from 'lucide-react';
 
 const AuthWrapper: React.FC = () => {
@@ -88,6 +91,9 @@ const AppContent: React.FC = () => {
             } 
           />
           <Route path="/chat" element={<ChatInterface />} />
+          <Route path="/quiz-generator" element={<QuizGenerator />} />
+          <Route path="/speech-test" element={<SpeechTest />} />
+          <Route path="/speech-recognition-test" element={<SpeechRecognitionTest />} />
           <Route 
             path="/quiz/:quizId" 
             element={
