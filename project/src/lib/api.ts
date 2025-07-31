@@ -57,6 +57,7 @@ export class QuizAPI {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true'
         },
         body: JSON.stringify(request),
       });
@@ -80,6 +81,7 @@ export class QuizAPI {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true'
         },
         body: JSON.stringify(request),
       });

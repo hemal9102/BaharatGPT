@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { getUserLearningHistory, saveQuizAttempt } from '../../lib/quizService';
+import { getUserLearningHistory, saveQuizAttempt, saveLearningHistory } from '../../lib/quizService';
 import { supabase } from '../../lib/supabase';
 import { QuizAPI, QuizGenerationResponse, QuizSubmissionResponse } from '../../lib/api';
 import { Clock, CheckCircle, XCircle, Award, RotateCcw, Loader2 } from 'lucide-react';
@@ -40,22 +40,113 @@ export const QuizGenerator: React.FC<QuizGeneratorProps> = ({ onComplete }) => {
 
     try {
       // Get user's learning history to determine topics
-      const { data: learningHistory } = await supabase
-        .from('learning_history')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('timestamp', { ascending: false })
-        .limit(10);
+      const { data: learningHistory } = await getUserLearningHistory(user.id, 10);
 
-      const quizData = await QuizAPI.generateQuiz({
-        userId: user.id,
-        lessonId: learningHistory?.[0]?.id || undefined,
-      });
+      // Try to generate quiz from n8n workflow
+      try {
+        const quizData = await QuizAPI.generateQuiz({
+          userId: user.id,
+          lessonId: learningHistory?.[0]?.id || undefined,
+        });
 
-      setQuiz(quizData.quiz);
-      setTimeRemaining(600); // Reset timer
-      setCurrentQuestionIndex(0);
-      setAnswers({});
+        setQuiz(quizData.quiz);
+        setTimeRemaining(600); // Reset timer
+        setCurrentQuestionIndex(0);
+        setAnswers({});
+
+        // Save learning history for quiz generation
+        await saveLearningHistory({
+          user_id: user.id,
+          topic: quizData.quiz.topic,
+          activity_type: 'quiz_generated',
+          details: {
+            quiz_title: quizData.quiz.title,
+            question_count: quizData.quiz.questions.length
+          }
+        });
+      } catch (n8nError) {
+        console.error('N8N workflow error:', n8nError);
+        
+        // Fallback: Generate a simple quiz locally
+        const fallbackQuiz = {
+          title: "Digital Literacy Basics Quiz",
+          topic: "Digital Literacy",
+          level: "beginner",
+          questions: [
+            {
+              type: 'mcq' as const,
+              question: "What is the primary purpose of a web browser?",
+              options: [
+                "To create documents",
+                "To browse and view websites on the internet",
+                "To send emails",
+                "To play games"
+              ],
+              correct_answer: "To browse and view websites on the internet"
+            },
+            {
+              type: 'mcq' as const,
+              question: "Which of the following is NOT a common file format for images?",
+              options: [
+                "JPEG",
+                "PNG",
+                "MP3",
+                "GIF"
+              ],
+              correct_answer: "MP3"
+            },
+            {
+              type: 'mcq' as const,
+              question: "What does 'URL' stand for?",
+              options: [
+                "Uniform Resource Locator",
+                "Universal Reference Link",
+                "User Resource Location",
+                "Uniform Reference Locator"
+              ],
+              correct_answer: "Uniform Resource Locator"
+            },
+            {
+              type: 'mcq' as const,
+              question: "Which programming language is commonly used for web development?",
+              options: [
+                "Java",
+                "Python",
+                "JavaScript",
+                "All of the above"
+              ],
+              correct_answer: "All of the above"
+            },
+            {
+              type: 'mcq' as const,
+              question: "What is the purpose of a firewall?",
+              options: [
+                "To speed up internet connection",
+                "To protect against unauthorized access to a network",
+                "To store files",
+                "To create backups"
+              ],
+              correct_answer: "To protect against unauthorized access to a network"
+            }
+          ]
+        };
+
+        setQuiz(fallbackQuiz);
+        setTimeRemaining(600);
+        setCurrentQuestionIndex(0);
+        setAnswers({});
+
+        // Save learning history for fallback quiz
+        await saveLearningHistory({
+          user_id: user.id,
+          topic: "Digital Literacy",
+          activity_type: 'quiz_generated_fallback',
+          details: {
+            quiz_title: fallbackQuiz.title,
+            question_count: fallbackQuiz.questions.length
+          }
+        });
+      }
     } catch (err) {
       console.error('Error generating quiz:', err);
       setError('Failed to generate quiz. Please try again.');
@@ -83,17 +174,81 @@ export const QuizGenerator: React.FC<QuizGeneratorProps> = ({ onComplete }) => {
         answer: answer.trim()
       }));
 
-      const result = await QuizAPI.submitQuiz({
-        userId: user.id,
-        userAnswers,
-        quizData: quiz,
-      });
+      let result: QuizSubmissionResponse;
+
+      try {
+        // Try to submit to n8n workflow
+        result = await QuizAPI.submitQuiz({
+          userId: user.id,
+          userAnswers,
+          quizData: quiz,
+        });
+      } catch (n8nError) {
+        console.error('N8N submission error:', n8nError);
+        
+        // Fallback: Grade locally
+        const gradedQuestions = quiz.questions.map((question, index) => {
+          const userAnswer = answers[index] || '';
+          const isCorrect = userAnswer.trim().toLowerCase() === question.correct_answer.toLowerCase();
+          
+          return {
+            question: question.question,
+            type: question.type,
+            user_answer: userAnswer,
+            correct_answer: question.correct_answer,
+            is_correct: isCorrect
+          };
+        });
+
+        const correctCount = gradedQuestions.filter(q => q.is_correct).length;
+        const scorePercent = Math.round((correctCount / quiz.questions.length) * 100);
+        const passed = scorePercent >= 70; // 70% passing threshold
+
+        result = {
+          userId: user.id,
+          quiz_topic: quiz.topic,
+          quiz_title: quiz.title,
+          total_questions: quiz.questions.length,
+          correct_count: correctCount,
+          score_percent: scorePercent,
+          passed: passed,
+          feedback: passed 
+            ? "Great job! You've demonstrated good understanding of the material."
+            : "Keep practicing! Review the material and try again.",
+          graded_questions: gradedQuestions
+        };
+      }
 
       setResults(result);
       setShowResults(true);
 
       // Save to Supabase
-      await saveQuizAttempt(result);
+      if (user) {
+        await saveQuizAttempt({
+          user_id: user.id,
+          quiz_topic: result.quiz_topic,
+          quiz_title: result.quiz_title,
+          total_questions: result.total_questions,
+          correct_count: result.correct_count,
+          score_percent: result.score_percent,
+          passed: result.passed,
+          feedback: result.feedback,
+          graded_questions: result.graded_questions,
+          completed_at: new Date().toISOString(),
+        });
+
+        // Save learning history
+        await saveLearningHistory({
+          user_id: user.id,
+          topic: result.quiz_topic,
+          activity_type: 'quiz_completed',
+          details: {
+            score: result.score_percent,
+            passed: result.passed,
+            total_questions: result.total_questions
+          }
+        });
+      }
 
       if (onComplete) {
         onComplete(result);
@@ -106,24 +261,7 @@ export const QuizGenerator: React.FC<QuizGeneratorProps> = ({ onComplete }) => {
     }
   };
 
-  const saveQuizAttempt = async (result: QuizSubmissionResponse) => {
-    try {
-      await supabase.from('quiz_attempts').insert({
-        user_id: user?.id,
-        quiz_topic: result.quiz_topic,
-        quiz_title: result.quiz_title,
-        total_questions: result.total_questions,
-        correct_count: result.correct_count,
-        score_percent: result.score_percent,
-        passed: result.passed,
-        feedback: result.feedback,
-        graded_questions: result.graded_questions,
-        completed_at: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.error('Error saving quiz attempt:', error);
-    }
-  };
+
 
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
