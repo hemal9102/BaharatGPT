@@ -20,56 +20,34 @@ export const StudentDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (user) {
-      fetchDashboardData();
-    }
-  }, [user]);
+    // Dummy data for testing purposes
+    setModules([
+      { id: 1, title: 'Module 1', subject: 'Math', difficulty_level: 'Easy' },
+      { id: 2, title: 'Module 2', subject: 'Science', difficulty_level: 'Medium' },
+      { id: 3, title: 'Module 3', subject: 'History', difficulty_level: 'Hard' }
+    ]);
 
-  const fetchDashboardData = async () => {
-    try {
-      // Fetch learning modules
-      const { data: modulesData } = await supabase
-        .from('learning_modules')
-        .select('*')
-        .eq('is_active', true)
-        .order('order_index');
+    setProgress([
+      { module_id: 1, status: 'completed', completion_percentage: 100 },
+      { module_id: 2, status: 'in_progress', completion_percentage: 50 },
+      { module_id: 3, status: 'not_started', completion_percentage: 0 }
+    ]);
 
-      // Fetch user progress
-      const { data: progressData } = await supabase
-        .from('user_progress')
-        .select('*')
-        .eq('user_id', user?.id);
+    setRecentAttempts([
+      { id: 1, quiz_title: 'Quiz 1', completed_at: new Date().toISOString(), score_percent: 85, passed: true },
+      { id: 2, quiz_title: 'Quiz 2', completed_at: new Date().toISOString(), score_percent: 70, passed: true },
+      { id: 3, quiz_title: 'Quiz 3', completed_at: new Date().toISOString(), score_percent: 50, passed: false }
+    ]);
 
-      // Fetch recent quiz attempts
-      const { data: attemptsData } = await supabase
-        .from('quiz_attempts')
-        .select('*')
-        .eq('user_id', user?.id)
-        .order('completed_at', { ascending: false })
-        .limit(5);
+    setStats({
+      completedModules: 1,
+      totalModules: 3,
+      averageScore: 68,
+      certificationsEarned: 2
+    });
 
-      // Calculate stats
-      const completedModules = progressData?.filter(p => p.status === 'completed').length || 0;
-      const totalModules = modulesData?.length || 0;
-      const averageScore = attemptsData?.length 
-        ? attemptsData.reduce((sum, attempt) => sum + attempt.percentage, 0) / attemptsData.length
-        : 0;
-
-      setModules(modulesData || []);
-      setProgress(progressData || []);
-      setRecentAttempts(attemptsData || []);
-      setStats({
-        completedModules,
-        totalModules,
-        averageScore: Math.round(averageScore),
-        certificationsEarned: attemptsData?.filter(a => a.passed).length || 0
-      });
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    setLoading(false);
+  }, []);
 
   if (loading) {
     return (

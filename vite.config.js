@@ -1,3 +1,8 @@
+
 export default {
-  base: 'h:/MAVERICKEFFECTAI/BaharatGPT/index.html',
+  base: '/',
+  server: {
+    port: 3000, // or any other available port
+  },
 };
+

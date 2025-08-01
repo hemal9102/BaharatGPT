@@ -39,116 +39,79 @@ export const QuizGenerator: React.FC<QuizGeneratorProps> = ({ onComplete }) => {
     setError(null);
 
     try {
-      // Get user's learning history to determine topics
-      const { data: learningHistory } = await getUserLearningHistory();
+      // All available quizzes data
+      const sampleQuizzes = [
+        {
+          id: "327728b4-4cea-44c7-8062-db747504c154",
+          title: "Computer Power On",
+          description: "Quiz on Computer Basics",
+          time_limit_minutes: 30,
+          passing_score: 60,
+          topic: "Computer Basics",
+          questions: JSON.parse('[{"type": "mcq", "options": ["To adjust the volume", "To turn the computer on or off", "To change the screen brightness", "To access the internet"], "question": "What is the primary function of the power button on a computer?", "correct_answer": "To turn the computer on or off"}, {"type": "mcq", "options": ["The computer to immediately start working", "The screen to light up and display something", "A beep sound", "The computer to vibrate"], "question": "After pressing the power button, what should you wait for?", "correct_answer": "The screen to light up and display something"}]')
+        },
+        {
+          id: "3a0f1acb-3c63-4c4d-85f1-96b3a64f1633",
+          title: "HTML Heading Basics",
+          description: "Quiz on HTML",
+          time_limit_minutes: 30,
+          passing_score: 60,
+          topic: "HTML",
+          questions: JSON.parse('[{"type": "mcq", "options": ["<heading>", "<head>", "<h1>", "<title>"], "question": "What HTML tag is used to create a main heading?", "correct_answer": "<h1>"}, {"type": "short_answer", "question": "What does \'h1\' typically represent in HTML?", "correct_answer": "The most important heading on a page."}, {"type": "true_false", "question": "Using multiple h1 tags on a page is generally recommended for good HTML structure.", "correct_answer": "false"}]')
+        },
+        {
+          id: "4e2f29fb-ba3c-4d83-8f32-f78718001c9d",
+          title: "Understanding Websites and HTML",
+          description: "Quiz on Websites and HTML",
+          time_limit_minutes: 30,
+          passing_score: 60,
+          topic: "Web Development",
+          questions: JSON.parse('[{"type": "mcq", "options": ["A physical book", "A collection of web pages accessible online", "A type of computer virus", "A social media platform"], "question": "What is a website?", "correct_answer": "A collection of web pages accessible online"}, {"type": "mcq", "options": ["CSS", "JavaScript", "HTML", "Python"], "question": "Which language is used to structure the content of a webpage?", "correct_answer": "HTML"}, {"type": "mcq", "options": ["Hyper Text Markup Language", "Highly Technical Machine Language", "Hyperlink and Text Management Language", "Home Tool Markup Language"], "question": "What does HTML stand for?", "correct_answer": "Hyper Text Markup Language"}]')
+        },
+        {
+          id: "3b6d73b4-5d78-41e6-8059-93e4e2013e2f",
+          title: "Basic Python Syntax",
+          description: "Quiz on Introduction to Python",
+          time_limit_minutes: 30,
+          passing_score: 60,
+          topic: "Python",
+          questions: JSON.parse('[{"type": "mcq", "options": ["Hello, World!", "World, Hello!", "Error", "Nothing"], "question": "What is the output of the following code?\\npython\\nprint(\\"Hello, World!\\")\\n", "correct_answer": "Hello, World!"}, {"type": "mcq", "options": ["print()", "display()", "show()", "write()"], "question": "Which keyword is used to print output in Python?", "correct_answer": "print()"}, {"type": "mcq", "options": ["To execute code", "To store variables", "To explain code", "To create functions"], "question": "What is a comment in Python used for?", "correct_answer": "To explain code"}]')
+        },
+        {
+          id: "58a3444e-9b8a-476f-8114-75a04cf65f13",
+          title: "Introduction to Python",
+          description: "Quiz on Python Basics",
+          time_limit_minutes: 30,
+          passing_score: 60,
+          topic: "Python",
+          questions: JSON.parse('[{"type": "mcq", "options": ["Creating mobile apps only", "Web development, data analysis, and automation", "Database management only", "Game development only"], "question": "What is Python primarily used for?", "correct_answer": "Web development, data analysis, and automation"}, {"type": "mcq", "options": ["Calculates a value", "Displays output on the screen", "Defines a new variable", "Imports a library"], "question": "What does the `print()` function do in Python?", "correct_answer": "Displays output on the screen"}]')
+        }
+      ];
 
-      // Try to generate quiz from n8n workflow
-      try {
-        const quizData = await QuizAPI.generateQuiz({
-          userId: user.id,
-          lessonId: learningHistory?.[0]?.id || undefined,
-        });
+      // Randomly select a quiz
+      const selectedQuiz = sampleQuizzes[Math.floor(Math.random() * sampleQuizzes.length)];
+      
+      // Set the quiz state directly
+      setQuiz(selectedQuiz);
+      setTimeRemaining(600);
+      setCurrentQuestionIndex(0);
+      setAnswers({});
+      
+      // Save to learning history
+      await saveLearningHistory({
+        topic: selectedQuiz.topic,
+        activity_type: 'quiz_generated',
+        details: {
+          quiz_title: selectedQuiz.title,
+          question_count: selectedQuiz.questions.length
+        }
+      });
 
-        setQuiz(quizData.quiz);
-        setTimeRemaining(600); // Reset timer
-        setCurrentQuestionIndex(0);
-        setAnswers({});
+      setIsGenerating(false);
 
-        // Save learning history for quiz generation
-        await saveLearningHistory({
-          topic: quizData.quiz.topic,
-          activity_type: 'quiz_generated',
-          details: {
-            quiz_title: quizData.quiz.title,
-            question_count: quizData.quiz.questions.length
-          }
-        });
-      } catch (n8nError) {
-        console.error('N8N workflow error:', n8nError);
-        
-        // Fallback: Generate a simple quiz locally
-        const fallbackQuiz = {
-          title: "Digital Literacy Basics Quiz",
-          topic: "Digital Literacy",
-          level: "beginner",
-          questions: [
-            {
-              type: 'mcq' as const,
-              question: "What is the primary purpose of a web browser?",
-              options: [
-                "To create documents",
-                "To browse and view websites on the internet",
-                "To send emails",
-                "To play games"
-              ],
-              correct_answer: "To browse and view websites on the internet"
-            },
-            {
-              type: 'mcq' as const,
-              question: "Which of the following is NOT a common file format for images?",
-              options: [
-                "JPEG",
-                "PNG",
-                "MP3",
-                "GIF"
-              ],
-              correct_answer: "MP3"
-            },
-            {
-              type: 'mcq' as const,
-              question: "What does 'URL' stand for?",
-              options: [
-                "Uniform Resource Locator",
-                "Universal Reference Link",
-                "User Resource Location",
-                "Uniform Reference Locator"
-              ],
-              correct_answer: "Uniform Resource Locator"
-            },
-            {
-              type: 'mcq' as const,
-              question: "Which programming language is commonly used for web development?",
-              options: [
-                "Java",
-                "Python",
-                "JavaScript",
-                "All of the above"
-              ],
-              correct_answer: "All of the above"
-            },
-            {
-              type: 'mcq' as const,
-              question: "What is the purpose of a firewall?",
-              options: [
-                "To speed up internet connection",
-                "To protect against unauthorized access to a network",
-                "To store files",
-                "To create backups"
-              ],
-              correct_answer: "To protect against unauthorized access to a network"
-            }
-          ]
-        };
-
-        setQuiz(fallbackQuiz);
-        setTimeRemaining(600);
-        setCurrentQuestionIndex(0);
-        setAnswers({});
-
-        // Save learning history for fallback quiz
-        await saveLearningHistory({
-          topic: "Digital Literacy",
-          activity_type: 'quiz_generated_fallback',
-          details: {
-            quiz_title: fallbackQuiz.title,
-            question_count: fallbackQuiz.questions.length
-          }
-        });
-      }
     } catch (err) {
       console.error('Error generating quiz:', err);
-      setError('Failed to generate quiz. Please try again.');
-    } finally {
+      setError('Failed to load quiz. Please try again.');
       setIsGenerating(false);
     }
   };
@@ -513,4 +476,4 @@ export const QuizGenerator: React.FC<QuizGeneratorProps> = ({ onComplete }) => {
       </div>
     </div>
   );
-}; 
+};

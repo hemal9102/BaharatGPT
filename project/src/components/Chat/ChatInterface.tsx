@@ -1,12 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, BookOpen, User, Bot, Volume2, VolumeX, Globe, Mic, MicOff, History } from 'lucide-react';
+import { Send, BookOpen, User, Bot, Volume2, VolumeX, Globe, Mic, MicOff } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { Message, LearningModule } from '../../types';
 import { speakText, stopSpeaking, initializeVoices, isSpeechSupported, checkLanguageSupport } from '../../utils/speechUtils';
 import { VoiceNotification } from './VoiceNotification';
 import { speechRecognitionManager, isSpeechRecognitionSupported } from '../../utils/speechRecognition';
-import { getUserLearningHistory } from '../../lib/quizService';
 
 interface MultilingualResponse {
   type: string;
@@ -46,8 +45,6 @@ export const ChatInterface: React.FC = () => {
   const [showVoiceNotification, setShowVoiceNotification] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
-  const [learningHistory, setLearningHistory] = useState<any[]>([]);
-  const [showHistory, setShowHistory] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
@@ -60,8 +57,7 @@ export const ChatInterface: React.FC = () => {
     speechRecognitionManager.setCallbacks({
       onResult: (text: string) => {
         setInputMessage(text);
-        // Don't stop listening - keep it continuous
-        // Only stop if user manually stops or submits
+        setIsListening(false);
       },
       onError: (error: string) => {
         console.error('Speech recognition error:', error);
@@ -86,64 +82,38 @@ export const ChatInterface: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Fetch user's learning history
-  const fetchLearningHistory = async () => {
-    try {
-      const { data } = await getUserLearningHistory();
-      if (data) {
-        setLearningHistory(data);
-      }
-    } catch (error) {
-      console.error('Error fetching learning history:', error);
-    }
-  };
-
-  // Load learning history when component mounts
-  useEffect(() => {
-    if (user) {
-      fetchLearningHistory();
-    }
-  }, [user]);
-
-  // Format message text to clean up markdown and formatting
-  const formatMessageText = (text: string): string => {
-    return text
-      // Convert markdown bold to HTML
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      // Convert markdown italic to HTML
-      .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      // Convert line breaks to proper HTML
-      .replace(/\n/g, '<br />')
-      // Clean up multiple spaces
-      .replace(/\s+/g, ' ')
-      // Add proper spacing around code blocks
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      // Clean up any remaining asterisks that aren't part of formatting
-      .replace(/(?<!\*)\*(?!\*)/g, '')
-      .trim();
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputMessage.trim() || isLoading) return;
 
-    // Stop listening when submitting
-    if (isListening) {
-      speechRecognitionManager.stopListening();
-    }
+    // Add user message to chat immediately
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now(),
+        text: inputMessage,
+        isUser: true,
+        timestamp: new Date()
+      }
+    ]);
+    setInputMessage(""); // Clear input immediately after sending
 
-    const userMessage: Message = {
-      id: Date.now(),
-      text: inputMessage.trim(),
-      isUser: true,
-      timestamp: new Date(),
-      module_id: currentModule?.id
-    };
+    // Process user input and generate a response
+    let response = await fetchResponseFromBackend(inputMessage);
+    response = response.replace(/\*/g, ""); // Remove all asterisks
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now() + 1,
+        text: response,
+        isUser: false,
+        timestamp: new Date()
+      }
+    ]);
+  };
 
-    setMessages(prev => [...prev, userMessage]);
-    setInputMessage('');
+  const fetchResponseFromBackend = async (message: string) => {
     setIsLoading(true);
-
     try {
       // Send to your N8N multilingual workflow
       const webhookUrl = import.meta.env.VITE_N8N_WEBHOOK_URL || 'https://e033a98c0626.ngrok-free.app/webhook/67a85760-2dd7-474a-bd42-cb2d6b17e7cc';
@@ -155,10 +125,10 @@ export const ChatInterface: React.FC = () => {
           'ngrok-skip-browser-warning': 'true'
         },
         body: JSON.stringify({
-          message: userMessage.text,
+          message: message,
           user_id: user?.id,
-          chatInput: userMessage.text,
-          body: { body: { message: userMessage.text } },
+          chatInput: message,
+          body: { body: { message: message } },
           context: {
             previous_messages: messages.slice(-5),
             user_level: 'beginner',
@@ -167,11 +137,15 @@ export const ChatInterface: React.FC = () => {
         })
       });
 
-      const rawData = await response.json();
-            // N8N might return an array with one object, or just the object.
-      const data = Array.isArray(rawData) ? rawData[0] : rawData; // Extract the first object if it's an array
-      
-      // Handle multilingual response
+      let rawData;
+      try {
+        rawData = await response.json();
+      } catch (jsonError) {
+        console.error('Webhook error: Invalid JSON response', jsonError);
+        return "I'm having trouble connecting right now, but I'm here to help you learn digital literacy! What would you like to learn today?";
+      }
+      // N8N might return an array with one object, or just the object.
+      const data = Array.isArray(rawData) ? rawData[0] : rawData;
       let aiResponseText = '';
       if (data.response && data.response.languages) {
         const multilingualData = data.response as MultilingualResponse;
@@ -182,71 +156,19 @@ export const ChatInterface: React.FC = () => {
         aiResponseText = data.response || data.message || "I'm here to help you learn! Could you please rephrase your question?";
       }
       
-      const aiMessage: Message = {
-        id: Date.now() + 1,
-        text: aiResponseText,
-        isUser: false,
-        timestamp: new Date(),
-        understanding_feedback: data.understanding_level || 3
-      };
-
-      setMessages(prev => [...prev, aiMessage]);
-
-      // Save chat interaction to learning_history table with multilingual support
+      // Save chat interaction to database with multilingual support
       if (user) {
-        try {
-          // Get current authenticated user
-          const { data: { user: currentUser } } = await supabase.auth.getUser();
-          
-          if (currentUser) {
-            // Save user message to learning history
-            await supabase.from('learning_history').insert({
-              user_id: currentUser.id,
-              type: 'chat_user_message',
-              english: selectedLanguage === 'english' ? userMessage.text : '',
-              hindi: selectedLanguage === 'hindi' ? userMessage.text : '',
-              gujarati: selectedLanguage === 'gujarati' ? userMessage.text : '',
-              content: userMessage.text,
-              timestamp: new Date().toISOString()
-            });
-
-            // Save AI response to learning history
-            await supabase.from('learning_history').insert({
-              user_id: currentUser.id,
-              type: 'chat_ai_response',
-              english: selectedLanguage === 'english' ? aiMessage.text : '',
-              hindi: selectedLanguage === 'hindi' ? aiMessage.text : '',
-              gujarati: selectedLanguage === 'gujarati' ? aiMessage.text : '',
-              content: aiMessage.text,
-              understanding_level: data.understanding_level || 3,
-              language_used: selectedLanguage,
-              timestamp: new Date().toISOString()
-            });
-
-            // Also save to chat_interactions table for backward compatibility
-            await supabase.from('chat_interactions').insert({
-              user_id: currentUser.id,
-              module_id: currentModule?.id,
-              user_message: userMessage.text,
-              ai_response: aiMessage.text,
-              understanding_level: data.understanding_level || 3,
-              language_used: selectedLanguage
-            });
-          }
-        } catch (error) {
-          console.error('Error saving to learning history:', error);
+        const { error: supabaseError } = await supabase.from('chat_interactions').insert({
+          user_id: user.id,
+          module_id: currentModule?.id,
+          user_message: message,
+          ai_response: aiResponseText,
+          understanding_level: data.understanding_level || 3,
+          language_used: selectedLanguage
+        });
+        if (supabaseError) {
+          console.error('Supabase chat_interactions insert error:', supabaseError);
         }
-        
-        // Refresh learning history after saving
-        await fetchLearningHistory();
-      }
-
-      // Restart listening if it was active before
-      if (speechSupported && !isListening) {
-        // Small delay to ensure the AI response is processed
-        setTimeout(() => {
-          speechRecognitionManager.startListening(selectedLanguage);
-        }, 1000);
       }
 
       // Text-to-speech for audio support with multilingual support
@@ -260,20 +182,13 @@ export const ChatInterface: React.FC = () => {
           console.log(`Using fallback voice for ${selectedLanguage}. Install language packs for better experience.`);
         }
         
-        speakText(aiMessage.text, selectedLanguage);
+        speakText(aiResponseText, selectedLanguage);
       }
       
+      return aiResponseText;
     } catch (error) {
       console.error('Webhook error:', error);
-      
-      const fallbackMessage: Message = {
-        id: Date.now() + 1,
-        text: "I'm having trouble connecting right now, but I'm here to help you learn digital literacy! What would you like to learn today?",
-        isUser: false,
-        timestamp: new Date()
-      };
-      
-      setMessages(prev => [...prev, fallbackMessage]);
+      return "I'm having trouble connecting right now, but I'm here to help you learn digital literacy! What would you like to learn today?";
     } finally {
       setIsLoading(false);
     }
@@ -300,12 +215,10 @@ export const ChatInterface: React.FC = () => {
   const handleMicrophoneToggle = () => {
     if (isListening) {
       speechRecognitionManager.stopListening();
-      setIsListening(false);
     } else {
       const success = speechRecognitionManager.startListening(selectedLanguage);
       if (!success) {
         console.error('Failed to start speech recognition');
-        setIsListening(false);
       }
     }
   };
@@ -347,16 +260,6 @@ export const ChatInterface: React.FC = () => {
               </div>
               
               <button
-                onClick={() => setShowHistory(!showHistory)}
-                className={`p-2 rounded-lg transition-colors ${
-                  showHistory ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'
-                }`}
-                title="View learning history"
-              >
-                <History className="w-5 h-5" />
-              </button>
-              
-              <button
                 onClick={() => {
                   if (audioEnabled) {
                     stopSpeaking();
@@ -377,61 +280,14 @@ export const ChatInterface: React.FC = () => {
 
       {/* Chat Section */}
       <main className="flex-1 pt-16 pb-20 overflow-hidden">
-        <div className="flex h-full">
-          {/* Learning History Sidebar */}
-          {showHistory && (
-            <div className="w-80 bg-white border-r border-gray-200 overflow-y-auto">
-              <div className="p-4 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900">Learning History</h3>
-                <p className="text-sm text-gray-600">Your recent learning activities</p>
-              </div>
-              <div className="p-4 space-y-3">
-                {learningHistory.length > 0 ? (
-                  learningHistory.map((item, index) => (
-                    <div key={index} className="p-3 bg-gray-50 rounded-lg">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-medium text-gray-500 uppercase">
-                          {item.type || item.activity_type}
-                        </span>
-                        <span className="text-xs text-gray-400">
-                          {new Date(item.timestamp).toLocaleDateString()}
-                        </span>
-                      </div>
-                      <div className="text-sm text-gray-900">
-                        {item.content || item.topic || 'Learning activity'}
-                      </div>
-                      {item.language_used && (
-                        <div className="text-xs text-blue-600 mt-1">
-                          Language: {item.language_used}
-                        </div>
-                      )}
-                      {item.understanding_level && (
-                        <div className="text-xs text-green-600 mt-1">
-                          Understanding: {item.understanding_level}/5
-                        </div>
-                      )}
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-center py-8 text-gray-500">
-                    <History className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-                    <p>No learning history yet</p>
-                    <p className="text-sm">Start chatting to build your history</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          
-          {/* Chat Messages */}
-          <div 
-            ref={chatContainerRef}
-            className={`h-full overflow-y-auto px-4 py-4 ${showHistory ? 'flex-1' : 'max-w-4xl mx-auto w-full'}`}
-          >
+        <div 
+          ref={chatContainerRef}
+          className="h-full overflow-y-auto px-4 py-4 max-w-4xl mx-auto"
+        >
           <div className="space-y-4">
-            {messages.map((message) => (
+            {messages.map((message, idx) => (
               <div
-                key={message.id}
+                key={message.id ? message.id : idx}
                 className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}
               >
                 <div className={`flex items-start space-x-2 max-w-xs sm:max-w-md md:max-w-lg ${message.isUser ? 'flex-row-reverse space-x-reverse' : 'flex-row'}`}>
@@ -452,14 +308,8 @@ export const ChatInterface: React.FC = () => {
                       }`}
                     >
                       <div 
-                        className="text-sm leading-relaxed max-w-none chat-message"
-                        style={{
-                          lineHeight: '1.6',
-                          wordBreak: 'break-word'
-                        }}
-                        dangerouslySetInnerHTML={{ 
-                          __html: formatMessageText(message.text)
-                        }}
+                        className="text-sm leading-relaxed"
+                        dangerouslySetInnerHTML={{ __html: message.text.replace(/<br>/g, '<br />') }}
                       />
                       
                       {/* Speech indicator for AI messages */}
@@ -479,7 +329,7 @@ export const ChatInterface: React.FC = () => {
                           <span className="text-xs text-gray-500">Understanding:</span>
                           {[1, 2, 3, 4, 5].map((level) => (
                             <div
-                              key={level}
+                              key={`understanding-${message.id}-${level}`}
                               className={`w-2 h-2 rounded-full ${
                                 level <= message.understanding_feedback! 
                                   ? 'bg-green-400' 
@@ -533,7 +383,6 @@ export const ChatInterface: React.FC = () => {
           
           <div ref={messagesEndRef} />
         </div>
-        </div>
       </main>
 
       {/* Enhanced Input Section */}
@@ -559,7 +408,7 @@ export const ChatInterface: React.FC = () => {
                 disabled={isLoading}
                 className={`flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center transition-colors duration-200 ${
                   isListening 
-                    ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg' 
+                    ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse' 
                     : 'bg-green-500 hover:bg-green-600 text-white'
                 }`}
                 title={isListening ? 'Stop listening' : `Speak in ${selectedLanguage}`}
@@ -580,10 +429,8 @@ export const ChatInterface: React.FC = () => {
           <div className="mt-2 text-xs text-gray-500 text-center">
             AI Chat Session - Ask me anything in your preferred language!
             {isListening && (
-              <div className="mt-1 text-red-500 font-medium animate-pulse flex items-center justify-center space-x-1">
-                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-                <span>🎤 Listening continuously... Speak now!</span>
-                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" style={{animationDelay: '0.2s'}}></div>
+              <div className="mt-1 text-red-500 font-medium animate-pulse">
+                🎤 Listening... Speak now!
               </div>
             )}
           </div>
